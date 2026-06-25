@@ -24,6 +24,22 @@ s=(L-1)-r
 
 ---
 
+## 展示图
+
+### 运行转换结果
+
+![运行转换结果](assets/demo-terminal-result.svg)
+
+### Notion 页面已连接 Integration
+
+![Notion 页面已连接 Integration](assets/demo-page-connection.svg)
+
+### Integration 配置页面
+
+![Integration 配置页面](assets/demo-integration-config.svg)
+
+---
+
 ## Notion 开发者入口（官方）
 👉 https://www.notion.so/my-integrations
 

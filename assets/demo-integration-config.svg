@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="640" viewBox="0 0 1100 640">
+  <rect width="1100" height="640" fill="#ffffff"/>
+  <text x="64" y="78" font-size="56" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="800" fill="#202124">Formula converter</text>
+
+  <rect x="64" y="118" width="112" height="64" rx="32" fill="#f1f1f1"/>
+  <text x="92" y="160" font-size="28" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" fill="#111827">配置</text>
+  <text x="220" y="160" font-size="30" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" fill="#8a8a8a">内容访问权限</text>
+  <text x="500" y="160" font-size="30" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" fill="#8a8a8a">Webhooks</text>
+  <text x="710" y="160" font-size="30" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" fill="#8a8a8a">所有者</text>
+
+  <text x="64" y="292" font-size="34" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="800" fill="#202124">显示信息</text>
+  <rect x="64" y="334" width="150" height="150" rx="20" fill="#d97f37"/>
+  <text x="114" y="425" font-size="72" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" fill="#ffffff">F</text>
+
+  <text x="280" y="366" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" fill="#6b7280">连接名称</text>
+  <rect x="280" y="386" width="720" height="80" rx="16" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>
+  <text x="306" y="438" font-size="34" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" fill="#202124">Formula converter</text>
+
+  <rect x="280" y="514" width="720" height="82" rx="16" fill="#f9fafb" stroke="#e5e7eb"/>
+  <text x="306" y="548" font-size="20" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" fill="#111827">Capabilities / 权限</text>
+  <text x="306" y="578" font-size="20" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" fill="#6b7280">Read content · Update content · Insert content</text>
+</svg>

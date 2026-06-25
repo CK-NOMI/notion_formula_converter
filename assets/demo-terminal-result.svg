@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640">
+  <rect width="1200" height="640" rx="26" fill="#1f2937"/>
+  <rect x="0" y="0" width="1200" height="52" rx="26" fill="#e5e7eb"/>
+  <circle cx="34" cy="26" r="10" fill="#ff5f57"/>
+  <circle cx="64" cy="26" r="10" fill="#ffbd2e"/>
+  <circle cx="94" cy="26" r="10" fill="#28c840"/>
+  <text x="132" y="34" font-size="20" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#374151">notion_formula_converter — node notion_formula_converter.js</text>
+
+  <text x="30" y="92" font-size="24" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f9fafb">已修改云端 Notion 页面。回到 Notion App 等待同步/刷新即可看到公式。</text>
+  <text x="30" y="132" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#d1d5db">页面 ID：388b7a41-83f8-8093-8ee6-d12629f71f41</text>
+  <text x="30" y="168" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#d1d5db">模式：正式修改</text>
+
+  <text x="30" y="216" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：s=(L-1)-r</text>
+  <text x="30" y="252" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：L=256</text>
+  <text x="30" y="288" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：s=255-r</text>
+  <text x="30" y="324" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：0 \rightarrow 黑</text>
+  <text x="30" y="360" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：255 \rightarrow 白</text>
+  <text x="30" y="396" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：s=cr^\gamma</text>
+  <text x="30" y="432" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：r'=\frac{64}{255}</text>
+  <text x="30" y="468" font-size="22" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#e5e7eb">转换 块公式：s'=c(r')^\gamma</text>
+
+  <rect x="30" y="520" width="1140" height="74" rx="14" fill="#111827" opacity="0.7"/>
+  <text x="54" y="552" font-size="21" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#34d399">DONE</text>
+  <text x="130" y="552" font-size="21" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f9fafb">已批量转换 bracket 公式为 Notion 原生 Equation</text>
+  <text x="54" y="580" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#9ca3af">返回 Notion App，等待同步或刷新页面即可查看</text>
+</svg>

@@ -199,7 +199,8 @@ function hasChineseSentence(text) {
 function isLikelyPathOrUrl(text) {
   const s = String(text || '').trim();
   if (/^https?:\/\//i.test(s)) return true;
-  if (/^\.?\.?\//.test(s) || /\/Users\/|\\/.test(s)) return true;
+  if (/^\.?\.?\//.test(s) || /\/Users\//.test(s)) return true;
+  if (/^[A-Za-z]:\\/.test(s) || /^\\\\[^\\]+\\[^\\]+/.test(s)) return true;
   if (/\.(html?|md|pdf|docx?|pptx?|xlsx?|png|jpe?g|gif|svg|js|ts|css|py|java|cpp|c|json)$/i.test(s)) return true;
   if (/^[\w.-]+\.(html?|md|pdf|docx?|pptx?|xlsx?|png|jpe?g|gif|svg|js|ts|css|py|java|cpp|c|json)$/i.test(s)) return true;
   return false;
@@ -344,6 +345,36 @@ function findBareParenthesizedInlineFormulas(text) {
   return pieces;
 }
 
+function findBareInlineFormulaSpans(text) {
+  const source = String(text || '');
+  const formulaPattern = /[A-Za-z][A-Za-z0-9_{}\\[\],.:;'\s]*\[[^\]\n]+\][A-Za-z0-9_{}\\[\],.:;'\s]*\s*[=<>≈≠≤≥]\s*[A-Za-z\\][A-Za-z0-9_{}\\[\],.:;'\s]*(?:\([^，。！？；\n]*\))?/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    let start = match.index;
+    let end = formulaPattern.lastIndex;
+
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!isStrongInlineFormula(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
 function toRichText(pieces) {
   return pieces.filter((piece) => piece.content !== '').map((piece) => {
     if (piece.type === 'equation') return { type: 'equation', equation: { expression: piece.content } };
@@ -357,7 +388,7 @@ function makeEquationBlock(expression) {
 
 function canUpdateInline(block) {
   const text = getPlainText(block);
-  return isTextLikeBlock(block) && (text.includes('[') || text.includes('［') || text.includes('(') || text.includes('（'));
+  return isTextLikeBlock(block) && /[\[［(（=<>≈≠≤≥_^\\]/.test(text);
 }
 
 async function appendEquationAfter(parentId, afterBlockId, expression, token) {
@@ -487,6 +518,7 @@ class Converter {
       if (matchWholeBracketFormula(text)) continue;
       let pieces = findInlineBracketFormulas(text);
       if (!pieces && this.smartMath) pieces = findBareParenthesizedInlineFormulas(text);
+      if (!pieces && this.smartMath) pieces = findBareInlineFormulaSpans(text);
       if (!pieces) continue;
       const count = pieces.filter((piece) => piece.type === 'equation').length;
       this.stats.inlineBlocks += 1;
@@ -581,8 +613,19 @@ async function main() {
   await converter.run(pageId);
 }
 
-main().catch((error) => {
-  console.error('\n运行失败：');
-  console.error(error.message || error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('\n运行失败：');
+    console.error(error.message || error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  findBareInlineFormulaSpans,
+  findBareParenthesizedInlineFormulas,
+  findInlineBracketFormulas,
+  isStrongInlineFormula,
+  looksLikeFormula,
+  toRichText,
+};

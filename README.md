@@ -1,26 +1,34 @@
 # Notion Formula Converter
 
 ## 作用
-把 Notion 页面中用这种写法的公式：
+把 Notion 页面中的公式文本批量转换成 Notion 原生 Equation（块公式/行内公式）。
 
-```
+支持三类常见输入：
+
+```text
 [s=(L-1)-r]
 ```
 
-或：
-
-```
+```text
 [
 s=(L-1)-r
 ]
 ```
 
-批量转换成 Notion 原生 Equation（块公式/行内公式）。
+```text
+T_{out}=
+\begin{bmatrix}
+5 & 0\\
+11 & 0\\
+17 & 0
+\end{bmatrix}
+```
 
 适用于：
 - Notion 网页版卡顿
 - 大量笔记公式无法编辑
-- 想用 App 流畅处理 + API 批量修复
+- 复制出来的公式有时有 `[ ]`，有时没有 `[ ]`
+- 想用 Notion App 流畅查看 + API 批量修复
 
 ---
 
@@ -52,7 +60,7 @@ s=(L-1)-r
 https://www.notion.so/my-integrations
 
 点击：
-```
+```text
 + New integration
 ```
 
@@ -75,25 +83,56 @@ https://www.notion.so/my-integrations
 
 ### 3. 安装 Node.js
 确认版本：
-```
+```bash
 node -v
 ```
->= 18
+需要 Node.js 18 或以上
 
 ---
 
-### 4. 运行（预览）
+## 推荐使用方式
 
+### 先预览，不修改页面
+
+```bash
+NOTION_TOKEN="你的token" node notion_formula_converter.js "页面URL" --aggressive
 ```
-NOTION_TOKEN="你的token" node notion_formula_converter.js "页面URL"
+
+### 确认数量没问题后正式执行
+
+```bash
+NOTION_TOKEN="你的token" node notion_formula_converter.js "页面URL" --aggressive --apply
 ```
+
+`--aggressive` 等于同时开启：
+- `--smart-math`：识别没有 `[ ]` 包裹的明显 LaTeX / 矩阵 / 等式块
+- `--cleanup-brackets`：清理残留的孤立 `[` 或 `]`
 
 ---
 
-### 5. 正式执行
+## 稳妥模式
+如果你只想转换明确被 `[ ]` 包住的公式，用：
 
-```
+```bash
 NOTION_TOKEN="你的token" node notion_formula_converter.js "页面URL" --apply
+```
+
+这个模式更保守，但不会处理没有 `[ ]` 的公式。
+
+---
+
+## 参数说明
+
+```text
+--apply              正式修改 Notion 页面；不加时只预览
+--dry-run            只预览，不修改页面
+--smart-math         识别没有 [ ] 包裹的明显 LaTeX/矩阵/等式块
+--cleanup-brackets   清理孤立的 [ 和 ] 段落
+--aggressive         等于 --smart-math --cleanup-brackets
+--no-inline          不转换段落内的 [公式] 行内公式
+--no-block           不转换独立的 [ 公式 ] 块公式
+--no-recursive       不递归处理子块
+--max-group-blocks N 最多把 N 个连续块视作一个 [ ... ] 公式组，默认 80
 ```
 
 ---
@@ -116,12 +155,16 @@ NOTION_TOKEN="你的token" node notion_formula_converter.js "页面URL" --apply
 ## 特性
 - 自动识别 `[formula]`
 - 支持 `[\n formula \n]` 三行结构
-- 支持连续 block `[ + formula + ]`
-- 自动过滤中文方括号（避免误转换）
+- 支持连续 block `[ + 多行公式 + ]`
+- 支持没有 `[ ]` 的明显 LaTeX/矩阵/等式块
+- 自动清理残留的孤立 `[` 和 `]`
+- 自动过滤中文标题类方括号，尽量避免把 `[考试重点]` 误转换
 
 ---
 
 ## 推荐流程
-1. 先 --dry-run
-2. 检查数量
-3. 再 --apply
+1. 复制一份 Notion 页面当备份
+2. 先运行 `--aggressive` 预览
+3. 检查终端里识别出的数量和内容
+4. 再运行 `--aggressive --apply`
+5. 回到 Notion App 等待同步或刷新

@@ -393,6 +393,105 @@ function findBareInlineFormulaSpans(text) {
   return pieces;
 }
 
+function findBareSimpleEquationFormulas(text) {
+  const source = String(text || '');
+  const formulaPattern = /[A-Za-z](?:[A-Za-z0-9_{}\\^']|\s)*(?:\([^，。！？；\n()]*\))?\s*[=<>≈≠≤≥]\s*[^，。！？；\n]+/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    let start = match.index;
+    let end = formulaPattern.lastIndex;
+
+    while (end > start && /[\s,，.。:：;；!?！？]$/.test(source.slice(start, end))) end -= 1;
+
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!formula || hasChineseSentence(formula) || isLikelyPathOrUrl(formula)) continue;
+    if (!/[=<>≈≠≤≥]/.test(formula)) continue;
+    if (!looksLikeFormula(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
+function findBareLatexCommandFormulas(text) {
+  const source = String(text || '');
+  const formulaPattern = /\\[A-Za-z]+(?:\s*\{[^{}\n]+\})+(?:\s*(?:[_^]\{[^{}\n]+\}|[_^][A-Za-z0-9]+))*?/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    const start = match.index;
+    const end = formulaPattern.lastIndex;
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!formula || hasChineseSentence(formula) || isLikelyPathOrUrl(formula)) continue;
+    if (!/\\[A-Za-z]+/.test(formula) || !/\{[^}]+\}/.test(formula)) continue;
+    if (!looksLikeFormula(formula) && !/^\\(hat|bar|tilde|vec|overline|underline|widehat|widetilde|dot|ddot)\s*\{[^}]+\}$/.test(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
+function findBareCommandExpressionFormulas(text) {
+  const source = String(text || '');
+  const formulaPattern = /\\[A-Za-z]+(?:\s+[A-Za-z][A-Za-z0-9]*(?:\([^，。！？；\n)]*\))?|\s+\\[A-Za-z]+|\s*[-+*/]\s*[\\A-Za-z0-9])[^，。！？；\n]*/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    let start = match.index;
+    let end = formulaPattern.lastIndex;
+    while (end > start && /[\s,，.。:：;；!?！？]$/.test(source.slice(start, end))) end -= 1;
+
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!formula || hasChineseSentence(formula) || isLikelyPathOrUrl(formula)) continue;
+    if (!/\\[A-Za-z]+/.test(formula)) continue;
+    if (!/[A-Za-z]\s*\([^)]*\)|[-+*/=<>≈≠≤≥]|\\(sum|prod|int|lim|min|max|beta|alpha|lambda|gamma|theta)/.test(formula)) continue;
+    if (!looksLikeFormula(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
 function isWholeBareFormulaCandidate(text) {
   const s = removeOuterDollarOrBrackets(text);
   if (!s || isLikelyPathOrUrl(s)) return false;
@@ -609,6 +708,9 @@ class Converter {
       if (matchWholeBracketFormula(text)) continue;
       let pieces = findInlineBracketFormulas(text);
       if (!pieces && this.smartMath) pieces = findWholeBareFormula(text);
+      if (!pieces && this.smartMath) pieces = findBareSimpleEquationFormulas(text);
+      if (!pieces && this.smartMath) pieces = findBareLatexCommandFormulas(text);
+      if (!pieces && this.smartMath) pieces = findBareCommandExpressionFormulas(text);
       if (!pieces && this.smartMath) pieces = findBareParenthesizedInlineFormulas(text);
       if (!pieces && this.smartMath) pieces = findBareInlineFormulaSpans(text);
       if (!pieces && this.smartMath) pieces = findBareParallelFunctionFormulas(text);
@@ -716,8 +818,11 @@ if (require.main === module) {
 
 module.exports = {
   findBareInlineFormulaSpans,
+  findBareCommandExpressionFormulas,
+  findBareLatexCommandFormulas,
   findBareParallelFunctionFormulas,
   findBareParenthesizedInlineFormulas,
+  findBareSimpleEquationFormulas,
   findWholeBareFormula,
   findInlineBracketFormulas,
   isStrongInlineFormula,

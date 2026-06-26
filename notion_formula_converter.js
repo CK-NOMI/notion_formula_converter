@@ -211,7 +211,6 @@ function looksLikeFormula(text) {
   if (s.length > 1600) return false;
   if (isLikelyPathOrUrl(s)) return false;
 
-  // 明显不是公式的中文标题/说明，避免把 [考试重点] 误转成公式。
   if (/^[\u4e00-\u9fff\s，。、“”‘’：；！？（）()【】]+$/.test(s)) return false;
   if (hasChineseSentence(s) && !/[=<>≈≠≤≥]|\\[a-zA-Z]+|[\^_]/.test(s)) return false;
 
@@ -245,8 +244,8 @@ function looksLikeFormulaLine(text) {
   return looksLikeFormula(s)
     || /^\\(begin|end)\s*\{/.test(s)
     || /^\\(vdots|cdots|dots|ldots)\\?$/.test(s)
-    || /^[-+]?\d+(\.\d+)?\s*&/.test(s)
-    || /&\s*[-+]?\d+(\.\d+)?\\?$/.test(s)
+    || /^[-+]?\d+(\.\d)?\s*&/.test(s)
+    || /&\s*[-+]?\d+(\.\d)?\\?$/.test(s)
     || /^[A-Za-z](_\{[^}]+\}|_\w|\^\{[^}]+\}|\^\w)?\s*=/.test(s)
     || /\\[a-zA-Z]+/.test(s);
 }
@@ -299,6 +298,52 @@ function findInlineBracketFormulas(text) {
   return pieces;
 }
 
+function isStrongInlineFormula(text) {
+  const s = removeOuterDollarOrBrackets(text);
+  if (!s || s.length > 300) return false;
+  if (hasChineseSentence(s) || isLikelyPathOrUrl(s)) return false;
+  if (!looksLikeFormula(s)) return false;
+  return /[=<>≈≠≤≥]/.test(s) && /\\[A-Za-z]+|_\{|\^\{|\[[^\]]+\]/.test(s);
+}
+
+function findBareParenthesizedInlineFormulas(text) {
+  const source = String(text || '');
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+
+  for (let i = 0; i < source.length; i += 1) {
+    if (source[i] !== '(' && source[i] !== '（') continue;
+    const openChar = source[i];
+    const closeChar = openChar === '(' ? ')' : '）';
+    let depth = 1;
+    let close = -1;
+    for (let j = i + 1; j < source.length; j += 1) {
+      if (source[j] === openChar) depth += 1;
+      else if (source[j] === closeChar) {
+        depth -= 1;
+        if (depth === 0) { close = j; break; }
+      }
+    }
+    if (close === -1) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(i + 1, close));
+    if (isStrongInlineFormula(formula)) {
+      if (i > cursor) pieces.push({ type: 'text', content: source.slice(cursor, i) });
+      pieces.push({ type: 'text', content: openChar });
+      pieces.push({ type: 'equation', content: formula });
+      pieces.push({ type: 'text', content: closeChar });
+      changed = true;
+      cursor = close + 1;
+      i = close;
+    }
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
 function toRichText(pieces) {
   return pieces.filter((piece) => piece.content !== '').map((piece) => {
     if (piece.type === 'equation') return { type: 'equation', equation: { expression: piece.content } };
@@ -312,7 +357,7 @@ function makeEquationBlock(expression) {
 
 function canUpdateInline(block) {
   const text = getPlainText(block);
-  return isTextLikeBlock(block) && (text.includes('[') || text.includes('［'));
+  return isTextLikeBlock(block) && (text.includes('[') || text.includes('［') || text.includes('(') || text.includes('（'));
 }
 
 async function appendEquationAfter(parentId, afterBlockId, expression, token) {
@@ -331,7 +376,6 @@ function buildRichTextUpdatePayload(block, richText) {
   if (typeof current.color === 'string') payload.color = current.color;
   if (block.type === 'to_do' && typeof current.checked === 'boolean') payload.checked = current.checked;
   if (block.type.startsWith('heading_') && typeof current.is_toggleable === 'boolean') payload.is_toggleable = current.is_toggleable;
-  // Notion API rejects icon: null, so copy callout icon only when it is a real object.
   if (block.type === 'callout' && current.icon && typeof current.icon === 'object') payload.icon = current.icon;
   return { [block.type]: payload };
 }
@@ -441,7 +485,8 @@ class Converter {
       if (skip.has(block.id) || block.archived || !canUpdateInline(block)) continue;
       const text = getPlainText(block);
       if (matchWholeBracketFormula(text)) continue;
-      const pieces = findInlineBracketFormulas(text);
+      let pieces = findInlineBracketFormulas(text);
+      if (!pieces && this.smartMath) pieces = findBareParenthesizedInlineFormulas(text);
       if (!pieces) continue;
       const count = pieces.filter((piece) => piece.type === 'equation').length;
       this.stats.inlineBlocks += 1;

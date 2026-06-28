@@ -43,6 +43,7 @@ const BLOCK_TYPES_THAT_CAN_HAVE_CHILDREN = new Set([
   'synced_block',
   'column_list',
   'column',
+  'table',
 ]);
 
 function parseArgs(argv) {
@@ -168,6 +169,11 @@ function getPlainText(block) {
 
 function isTextLikeBlock(block) { return !!getRichTextContainer(block); }
 function isParagraphOnly(block) { return block?.type === 'paragraph'; }
+function isTableRow(block) { return block?.type === 'table_row' && Array.isArray(block.table_row?.cells); }
+
+function richTextPlainText(richText) {
+  return Array.isArray(richText) ? richText.map((part) => part.plain_text || '').join('') : '';
+}
 
 function normalizeFormula(formula) {
   return String(formula || '').replace(/^\s+|\s+$/g, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -180,6 +186,18 @@ function removeOuterDollarOrBrackets(text) {
   if (/^\\\[[\s\S]*\\\]$/.test(s)) s = normalizeFormula(s.slice(2, -2));
   if (/^\\\([\s\S]*\\\)$/.test(s)) s = normalizeFormula(s.slice(2, -2));
   return s;
+}
+
+function normalizeEquationExpression(text) {
+  let s = removeOuterDollarOrBrackets(text);
+  s = s.replace(/\s*(?:\|\||｜｜|∥|‖|\\parallel)\s*/g, ' \\parallel ');
+  s = s.replace(/\bD_KL\b/g, 'D_{KL}');
+  s = s.replace(/\bKL\s*\(/g, '\\mathrm{KL}(');
+  s = s.replace(/^(?:Min|min)\s+/, '\\min ');
+  s = s.replace(/^(?:Max|max)\s+/, '\\max ');
+  s = s.replace(/^arg\s*min\s+/i, '\\arg\\min ');
+  s = s.replace(/^arg\s*max\s+/i, '\\arg\\max ');
+  return normalizeFormula(s);
 }
 
 function isStandaloneBracket(text) {
@@ -196,10 +214,15 @@ function hasChineseSentence(text) {
   return chineseCount >= 4 || /[，。！？；：、]/.test(s);
 }
 
+function removeLatexTextCommands(text) {
+  return String(text || '').replace(/\\text\s*\{[^{}]*\}/g, '\\text{}');
+}
+
 function isLikelyPathOrUrl(text) {
   const s = String(text || '').trim();
   if (/^https?:\/\//i.test(s)) return true;
-  if (/^\.?\.?\//.test(s) || /\/Users\/|\\/.test(s)) return true;
+  if (/^\.?\.?\//.test(s) || /\/Users\//.test(s)) return true;
+  if (/^[A-Za-z]:\\/.test(s) || /^\\\\[^\\]+\\[^\\]+/.test(s)) return true;
   if (/\.(html?|md|pdf|docx?|pptx?|xlsx?|png|jpe?g|gif|svg|js|ts|css|py|java|cpp|c|json)$/i.test(s)) return true;
   if (/^[\w.-]+\.(html?|md|pdf|docx?|pptx?|xlsx?|png|jpe?g|gif|svg|js|ts|css|py|java|cpp|c|json)$/i.test(s)) return true;
   return false;
@@ -218,11 +241,12 @@ function looksLikeFormula(text) {
     /\\begin\s*\{[^}]+\}/,
     /\\end\s*\{[^}]+\}/,
     /\\frac\s*\{/,
-    /\\sum|\\prod|\\int|\\lim|\\sqrt|\\theta|\\gamma|\\sigma|\\mu|\\alpha|\\beta|\\lambda|\\rightarrow|\\Rightarrow|\\vdots|\\cdots|\\dots/,
+    /\\sum|\\prod|\\int|\\lim|\\sqrt|\\frac|\\boxed|\\times|\\cdot|\\theta|\\gamma|\\sigma|\\mu|\\alpha|\\beta|\\lambda|\\rightarrow|\\Rightarrow|\\vdots|\\cdots|\\dots/,
     /[A-Za-z0-9}\])']\s*=\s*[-+\\A-Za-z0-9{(]/,
     /[=<>≈≠≤≥]/,
     /[A-Za-z]\s*_\s*\{/,
     /[A-Za-z]\s*\^\s*\{/,
+    /(?:\\parallel|\|\||｜｜|∥|‖)/,
     /\\\\/,
     /\s&\s/,
   ];
@@ -237,7 +261,7 @@ function looksLikeFormulaLine(text) {
   const s = removeOuterDollarOrBrackets(text);
   if (!s) return false;
   if (isStandaloneBracket(s)) return false;
-  if (hasChineseSentence(s)) return false;
+  if (hasChineseSentence(removeLatexTextCommands(s))) return false;
   if (isLikelyPathOrUrl(s)) return false;
   if (/^[-—–•·]+$/.test(s)) return false;
 
@@ -246,7 +270,8 @@ function looksLikeFormulaLine(text) {
     || /^\\(vdots|cdots|dots|ldots)\\?$/.test(s)
     || /^[-+]?\d+(\.\d)?\s*&/.test(s)
     || /&\s*[-+]?\d+(\.\d)?\\?$/.test(s)
-    || /^[A-Za-z](_\{[^}]+\}|_\w|\^\{[^}]+\}|\^\w)?\s*=/.test(s)
+    || /^[A-Za-z][A-Za-z0-9]*(?:_\{[^}]+\}|_\w|\^\{[^}]+\}|\^\w)?\s*=/.test(s)
+    || /^[A-Za-z][A-Za-z0-9]*(?:_\{[^}]+\}|_\w|\^\{[^}]+\}|\^\w)?\s*\([^)]*(?:\\parallel|\|\||｜｜|∥|‖)[^)]*\)\s*:?\s*$/.test(s)
     || /\\[a-zA-Z]+/.test(s);
 }
 
@@ -344,20 +369,226 @@ function findBareParenthesizedInlineFormulas(text) {
   return pieces;
 }
 
+function findBareInlineFormulaSpans(text) {
+  const source = String(text || '');
+  const formulaPattern = /[A-Za-z][A-Za-z0-9_{}\\[\],.:;'\s]*\[[^\]\n]+\][A-Za-z0-9_{}\\[\],.:;'\s]*\s*[=<>≈≠≤≥]\s*[A-Za-z\\][A-Za-z0-9_{}\\[\],.:;'\s]*(?:\([^，。！？；\n]*\))?/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    let start = match.index;
+    let end = formulaPattern.lastIndex;
+
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!isStrongInlineFormula(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
+function findBareSimpleEquationFormulas(text) {
+  const source = String(text || '');
+  const formulaPattern = /[A-Za-z](?:[A-Za-z0-9_{}\\^']|\s)*(?:\([^，。！？；\n()]*\))?\s*[=<>≈≠≤≥]\s*[^，。！？；\n]+/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    let start = match.index;
+    let end = formulaPattern.lastIndex;
+
+    while (end > start && /[\s,，.。:：;；!?！？]$/.test(source.slice(start, end))) end -= 1;
+
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!formula || hasChineseSentence(formula) || isLikelyPathOrUrl(formula)) continue;
+    if (!/[=<>≈≠≤≥]/.test(formula)) continue;
+    if (!looksLikeFormula(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
+function findBareLatexCommandFormulas(text) {
+  const source = String(text || '');
+  const formulaPattern = /\\[A-Za-z]+(?:\s*\{[^{}\n]+\})+(?:\s*(?:[_^]\{[^{}\n]+\}|[_^][A-Za-z0-9]+))*?/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    const start = match.index;
+    const end = formulaPattern.lastIndex;
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!formula || hasChineseSentence(formula) || isLikelyPathOrUrl(formula)) continue;
+    if (!/\\[A-Za-z]+/.test(formula) || !/\{[^}]+\}/.test(formula)) continue;
+    if (!looksLikeFormula(formula) && !/^\\(hat|bar|tilde|vec|overline|underline|widehat|widetilde|dot|ddot)\s*\{[^}]+\}$/.test(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
+function findBareCommandExpressionFormulas(text) {
+  const source = String(text || '');
+  const formulaPattern = /\\[A-Za-z]+(?:\s+[A-Za-z][A-Za-z0-9]*(?:\([^，。！？；\n)]*\))?|\s+\\[A-Za-z]+|\s*[-+*/]\s*[\\A-Za-z0-9])[^，。！？；\n]*/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    let start = match.index;
+    let end = formulaPattern.lastIndex;
+    while (end > start && /[\s,，.。:：;；!?！？]$/.test(source.slice(start, end))) end -= 1;
+
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (!formula || hasChineseSentence(formula) || isLikelyPathOrUrl(formula)) continue;
+    if (!/\\[A-Za-z]+/.test(formula)) continue;
+    if (!/[A-Za-z]\s*\([^)]*\)|[-+*/=<>≈≠≤≥]|\\(sum|prod|int|lim|min|max|beta|alpha|lambda|gamma|theta)/.test(formula)) continue;
+    if (!looksLikeFormula(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
+function isWholeBareFormulaCandidate(text) {
+  const s = removeOuterDollarOrBrackets(text);
+  if (!s || isLikelyPathOrUrl(s)) return false;
+  const hasMathSignal = /[=<>≈≠≤≥]|\\[a-zA-Z]+|[\^_]|(?:\\parallel|\|\||｜｜|∥|‖)/.test(s);
+  if (!hasMathSignal) return false;
+  if (hasChineseSentence(removeLatexTextCommands(s))) return false;
+  return looksLikeFormula(s)
+    || /^[=+\-]\s*(?:\\[a-zA-Z]+|[A-Za-z]\s*\()/.test(s)
+    || /^\\[a-zA-Z]+/.test(s)
+    || /^[A-Za-z][A-Za-z0-9]*(?:_\{[^}\n]+\}|_\w|\^\{[^}\n]+\}|\^\w)?\s*\([^)]*(?:\\parallel|\|\||｜｜|∥|‖)[^)]*\)(?:\s*=|\s*$)/.test(s);
+}
+
+function findWholeBareFormula(text) {
+  const source = String(text || '');
+  const start = source.search(/\S/);
+  if (start === -1) return null;
+  let end = source.length;
+  while (end > start && /\s/.test(source[end - 1])) end -= 1;
+
+  const core = source.slice(start, end);
+  const candidates = [];
+  candidates.push({ formula: core, formulaEnd: end, suffixStart: end });
+  const withoutColon = core.replace(/[：:]\s*$/, '');
+  if (withoutColon !== core) {
+    candidates.unshift({
+      formula: withoutColon.trimEnd(),
+      formulaEnd: start + withoutColon.length,
+      suffixStart: start + withoutColon.length,
+    });
+  }
+
+  for (const candidate of candidates) {
+    if (!isWholeBareFormulaCandidate(candidate.formula)) continue;
+    const pieces = [];
+    if (start > 0) pieces.push({ type: 'text', content: source.slice(0, start) });
+    pieces.push({ type: 'equation', content: candidate.formula });
+    if (candidate.suffixStart < source.length) pieces.push({ type: 'text', content: source.slice(candidate.suffixStart) });
+    return pieces;
+  }
+  return null;
+}
+
+function findBareParallelFunctionFormulas(text) {
+  const source = String(text || '');
+  const formulaPattern = /(?:(?:arg\s*)?(?:min|max|Min|Max)\s+)?[A-Za-z][A-Za-z0-9]*(?:_\{[^}\n]+\}|_\w|\^\{[^}\n]+\}|\^\w)?\s*\([^，。！？；\n)]*(?:\\parallel|\|\||｜｜|∥|‖)[^，。！？；\n)]*\)/g;
+  const pieces = [];
+  let cursor = 0;
+  let changed = false;
+  let match;
+
+  while ((match = formulaPattern.exec(source)) !== null) {
+    const start = match.index;
+    const end = formulaPattern.lastIndex;
+    const previous = source[start - 1] || '';
+    const next = source[end] || '';
+    if (/[A-Za-z0-9_\\{]/.test(previous) || /[A-Za-z0-9_\\}]/.test(next)) continue;
+
+    const formula = removeOuterDollarOrBrackets(source.slice(start, end));
+    if (hasChineseSentence(formula) || isLikelyPathOrUrl(formula)) continue;
+    if (!/(?:\\parallel|\|\||｜｜|∥|‖)/.test(formula)) continue;
+    if (!/(?:_\{[^}]+\}|\\[A-Za-z]+|\|\||｜｜|∥|‖)/.test(formula)) continue;
+
+    if (start > cursor) pieces.push({ type: 'text', content: source.slice(cursor, start) });
+    pieces.push({ type: 'equation', content: formula });
+    changed = true;
+    cursor = end;
+  }
+
+  if (!changed) return null;
+  if (cursor < source.length) pieces.push({ type: 'text', content: source.slice(cursor) });
+  return pieces;
+}
+
 function toRichText(pieces) {
   return pieces.filter((piece) => piece.content !== '').map((piece) => {
-    if (piece.type === 'equation') return { type: 'equation', equation: { expression: piece.content } };
+    if (piece.type === 'equation') return { type: 'equation', equation: { expression: normalizeEquationExpression(piece.content) } };
     return { type: 'text', text: { content: piece.content } };
   });
 }
 
 function makeEquationBlock(expression) {
-  return { object: 'block', type: 'equation', equation: { expression: removeOuterDollarOrBrackets(expression) } };
+  return { object: 'block', type: 'equation', equation: { expression: normalizeEquationExpression(expression) } };
 }
 
 function canUpdateInline(block) {
   const text = getPlainText(block);
-  return isTextLikeBlock(block) && (text.includes('[') || text.includes('［') || text.includes('(') || text.includes('（'));
+  return isTextLikeBlock(block) && /[\[［(（=<>≈≠≤≥_^\\|｜∥‖]/.test(text);
+}
+
+function canUpdateInlineText(text) {
+  return /[\[［(（=<>≈≠≤≥_^\\|｜∥‖]/.test(text);
 }
 
 async function appendEquationAfter(parentId, afterBlockId, expression, token) {
@@ -382,6 +613,10 @@ function buildRichTextUpdatePayload(block, richText) {
 
 async function updateBlockRichText(block, richText, token) {
   return notionRequest(`/blocks/${block.id}`, { method: 'PATCH', body: buildRichTextUpdatePayload(block, richText), token });
+}
+
+async function updateTableRowCells(block, cells, token) {
+  return notionRequest(`/blocks/${block.id}`, { method: 'PATCH', body: { table_row: { cells } }, token });
 }
 
 class Converter {
@@ -419,8 +654,8 @@ class Converter {
       await this.convertBracketGroups(parentId, children, skip);
       await this.convertWholeBlockFormulas(parentId, children, skip);
     }
-    if (this.includeInline) await this.convertInlineFormulas(children, skip);
     if (this.smartMath) await this.convertBareFormulaRuns(parentId, children, skip);
+    if (this.includeInline) await this.convertInlineFormulas(children, skip);
     if (this.cleanupBrackets) await this.cleanupStandaloneBracketBlocks(children, skip);
 
     if (this.recursive) {
@@ -482,17 +717,58 @@ class Converter {
 
   async convertInlineFormulas(children, skip) {
     for (const block of children) {
-      if (skip.has(block.id) || block.archived || !canUpdateInline(block)) continue;
+      if (skip.has(block.id) || block.archived) continue;
+      if (isTableRow(block)) {
+        await this.convertTableRowInlineFormulas(block, skip);
+        continue;
+      }
+      if (!canUpdateInline(block)) continue;
       const text = getPlainText(block);
       if (matchWholeBracketFormula(text)) continue;
-      let pieces = findInlineBracketFormulas(text);
-      if (!pieces && this.smartMath) pieces = findBareParenthesizedInlineFormulas(text);
+      const pieces = this.findInlineFormulaPieces(text);
       if (!pieces) continue;
       const count = pieces.filter((piece) => piece.type === 'equation').length;
       this.stats.inlineBlocks += 1;
       console.log(`行内公式块 #${this.stats.inlineBlocks}：${count} 个公式，文本：${oneLine(text)}`);
       if (this.apply) await updateBlockRichText(block, toRichText(pieces), this.token);
     }
+  }
+
+  findInlineFormulaPieces(text) {
+    let pieces = findInlineBracketFormulas(text);
+    if (!pieces && this.smartMath) pieces = findWholeBareFormula(text);
+    if (!pieces && this.smartMath) pieces = findBareSimpleEquationFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareLatexCommandFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareCommandExpressionFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareParenthesizedInlineFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareInlineFormulaSpans(text);
+    if (!pieces && this.smartMath) pieces = findBareParallelFunctionFormulas(text);
+    return pieces;
+  }
+
+  async convertTableRowInlineFormulas(block, skip) {
+    const currentCells = block.table_row.cells;
+    const updatedCells = currentCells.map((cell) => cell);
+    let changed = false;
+
+    for (let index = 0; index < currentCells.length; index += 1) {
+      const cell = currentCells[index];
+      const text = richTextPlainText(cell);
+      if (!text || !canUpdateInlineText(text) || matchWholeBracketFormula(text)) continue;
+
+      const pieces = this.findInlineFormulaPieces(text);
+      if (!pieces) continue;
+
+      const count = pieces.filter((piece) => piece.type === 'equation').length;
+      this.stats.inlineBlocks += 1;
+      console.log(`表格行内公式块 #${this.stats.inlineBlocks}：第 ${index + 1} 列，${count} 个公式，文本：${oneLine(text)}`);
+      updatedCells[index] = toRichText(pieces);
+      changed = true;
+    }
+
+    if (!changed) return;
+    skip.add(block.id);
+    if (this.apply) await updateTableRowCells(block, updatedCells, this.token);
   }
 
   async convertBareFormulaRuns(parentId, children, skip) {
@@ -555,8 +831,8 @@ class Converter {
 
 function looksLikeStandaloneFormulaBlock(text) {
   const s = removeOuterDollarOrBrackets(text);
-  if (!s || hasChineseSentence(s) || isLikelyPathOrUrl(s)) return false;
-  return /\\begin\s*\{|\\end\s*\{|\\frac|\\sum|\\prod|\\int|\\sqrt|\\theta|\\gamma|\\rightarrow|\\Rightarrow/.test(s)
+  if (!s || hasChineseSentence(removeLatexTextCommands(s)) || isLikelyPathOrUrl(s)) return false;
+  return /\\begin\s*\{|\\end\s*\{|\\frac|\\boxed|\\times|\\cdot|\\sum|\\prod|\\int|\\sqrt|\\theta|\\gamma|\\rightarrow|\\Rightarrow/.test(s)
     || /^[A-Za-z][A-Za-z0-9_{}'()\[\],:\s]*=/.test(s)
     || /[=<>≈≠≤≥].*[A-Za-z0-9]/.test(s);
 }
@@ -581,8 +857,27 @@ async function main() {
   await converter.run(pageId);
 }
 
-main().catch((error) => {
-  console.error('\n运行失败：');
-  console.error(error.message || error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('\n运行失败：');
+    console.error(error.message || error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  findBareInlineFormulaSpans,
+  findBareCommandExpressionFormulas,
+  findBareLatexCommandFormulas,
+  findBareParallelFunctionFormulas,
+  findBareParenthesizedInlineFormulas,
+  findBareSimpleEquationFormulas,
+  findWholeBareFormula,
+  findInlineBracketFormulas,
+  isStrongInlineFormula,
+  isWholeBareFormulaCandidate,
+  looksLikeStandaloneFormulaBlock,
+  looksLikeFormula,
+  normalizeEquationExpression,
+  toRichText,
+};

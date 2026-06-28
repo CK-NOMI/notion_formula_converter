@@ -43,6 +43,7 @@ const BLOCK_TYPES_THAT_CAN_HAVE_CHILDREN = new Set([
   'synced_block',
   'column_list',
   'column',
+  'table',
 ]);
 
 function parseArgs(argv) {
@@ -168,6 +169,11 @@ function getPlainText(block) {
 
 function isTextLikeBlock(block) { return !!getRichTextContainer(block); }
 function isParagraphOnly(block) { return block?.type === 'paragraph'; }
+function isTableRow(block) { return block?.type === 'table_row' && Array.isArray(block.table_row?.cells); }
+
+function richTextPlainText(richText) {
+  return Array.isArray(richText) ? richText.map((part) => part.plain_text || '').join('') : '';
+}
 
 function normalizeFormula(formula) {
   return String(formula || '').replace(/^\s+|\s+$/g, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -235,7 +241,7 @@ function looksLikeFormula(text) {
     /\\begin\s*\{[^}]+\}/,
     /\\end\s*\{[^}]+\}/,
     /\\frac\s*\{/,
-    /\\sum|\\prod|\\int|\\lim|\\sqrt|\\theta|\\gamma|\\sigma|\\mu|\\alpha|\\beta|\\lambda|\\rightarrow|\\Rightarrow|\\vdots|\\cdots|\\dots/,
+    /\\sum|\\prod|\\int|\\lim|\\sqrt|\\frac|\\boxed|\\times|\\cdot|\\theta|\\gamma|\\sigma|\\mu|\\alpha|\\beta|\\lambda|\\rightarrow|\\Rightarrow|\\vdots|\\cdots|\\dots/,
     /[A-Za-z0-9}\])']\s*=\s*[-+\\A-Za-z0-9{(]/,
     /[=<>≈≠≤≥]/,
     /[A-Za-z]\s*_\s*\{/,
@@ -581,6 +587,10 @@ function canUpdateInline(block) {
   return isTextLikeBlock(block) && /[\[［(（=<>≈≠≤≥_^\\|｜∥‖]/.test(text);
 }
 
+function canUpdateInlineText(text) {
+  return /[\[［(（=<>≈≠≤≥_^\\|｜∥‖]/.test(text);
+}
+
 async function appendEquationAfter(parentId, afterBlockId, expression, token) {
   const body = { children: [makeEquationBlock(expression)] };
   if (afterBlockId) body.after = afterBlockId;
@@ -603,6 +613,10 @@ function buildRichTextUpdatePayload(block, richText) {
 
 async function updateBlockRichText(block, richText, token) {
   return notionRequest(`/blocks/${block.id}`, { method: 'PATCH', body: buildRichTextUpdatePayload(block, richText), token });
+}
+
+async function updateTableRowCells(block, cells, token) {
+  return notionRequest(`/blocks/${block.id}`, { method: 'PATCH', body: { table_row: { cells } }, token });
 }
 
 class Converter {
@@ -703,23 +717,58 @@ class Converter {
 
   async convertInlineFormulas(children, skip) {
     for (const block of children) {
-      if (skip.has(block.id) || block.archived || !canUpdateInline(block)) continue;
+      if (skip.has(block.id) || block.archived) continue;
+      if (isTableRow(block)) {
+        await this.convertTableRowInlineFormulas(block, skip);
+        continue;
+      }
+      if (!canUpdateInline(block)) continue;
       const text = getPlainText(block);
       if (matchWholeBracketFormula(text)) continue;
-      let pieces = findInlineBracketFormulas(text);
-      if (!pieces && this.smartMath) pieces = findWholeBareFormula(text);
-      if (!pieces && this.smartMath) pieces = findBareSimpleEquationFormulas(text);
-      if (!pieces && this.smartMath) pieces = findBareLatexCommandFormulas(text);
-      if (!pieces && this.smartMath) pieces = findBareCommandExpressionFormulas(text);
-      if (!pieces && this.smartMath) pieces = findBareParenthesizedInlineFormulas(text);
-      if (!pieces && this.smartMath) pieces = findBareInlineFormulaSpans(text);
-      if (!pieces && this.smartMath) pieces = findBareParallelFunctionFormulas(text);
+      const pieces = this.findInlineFormulaPieces(text);
       if (!pieces) continue;
       const count = pieces.filter((piece) => piece.type === 'equation').length;
       this.stats.inlineBlocks += 1;
       console.log(`行内公式块 #${this.stats.inlineBlocks}：${count} 个公式，文本：${oneLine(text)}`);
       if (this.apply) await updateBlockRichText(block, toRichText(pieces), this.token);
     }
+  }
+
+  findInlineFormulaPieces(text) {
+    let pieces = findInlineBracketFormulas(text);
+    if (!pieces && this.smartMath) pieces = findWholeBareFormula(text);
+    if (!pieces && this.smartMath) pieces = findBareSimpleEquationFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareLatexCommandFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareCommandExpressionFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareParenthesizedInlineFormulas(text);
+    if (!pieces && this.smartMath) pieces = findBareInlineFormulaSpans(text);
+    if (!pieces && this.smartMath) pieces = findBareParallelFunctionFormulas(text);
+    return pieces;
+  }
+
+  async convertTableRowInlineFormulas(block, skip) {
+    const currentCells = block.table_row.cells;
+    const updatedCells = currentCells.map((cell) => cell);
+    let changed = false;
+
+    for (let index = 0; index < currentCells.length; index += 1) {
+      const cell = currentCells[index];
+      const text = richTextPlainText(cell);
+      if (!text || !canUpdateInlineText(text) || matchWholeBracketFormula(text)) continue;
+
+      const pieces = this.findInlineFormulaPieces(text);
+      if (!pieces) continue;
+
+      const count = pieces.filter((piece) => piece.type === 'equation').length;
+      this.stats.inlineBlocks += 1;
+      console.log(`表格行内公式块 #${this.stats.inlineBlocks}：第 ${index + 1} 列，${count} 个公式，文本：${oneLine(text)}`);
+      updatedCells[index] = toRichText(pieces);
+      changed = true;
+    }
+
+    if (!changed) return;
+    skip.add(block.id);
+    if (this.apply) await updateTableRowCells(block, updatedCells, this.token);
   }
 
   async convertBareFormulaRuns(parentId, children, skip) {
@@ -783,7 +832,7 @@ class Converter {
 function looksLikeStandaloneFormulaBlock(text) {
   const s = removeOuterDollarOrBrackets(text);
   if (!s || hasChineseSentence(removeLatexTextCommands(s)) || isLikelyPathOrUrl(s)) return false;
-  return /\\begin\s*\{|\\end\s*\{|\\frac|\\sum|\\prod|\\int|\\sqrt|\\theta|\\gamma|\\rightarrow|\\Rightarrow/.test(s)
+  return /\\begin\s*\{|\\end\s*\{|\\frac|\\boxed|\\times|\\cdot|\\sum|\\prod|\\int|\\sqrt|\\theta|\\gamma|\\rightarrow|\\Rightarrow/.test(s)
     || /^[A-Za-z][A-Za-z0-9_{}'()\[\],:\s]*=/.test(s)
     || /[=<>≈≠≤≥].*[A-Za-z0-9]/.test(s);
 }
@@ -827,6 +876,7 @@ module.exports = {
   findInlineBracketFormulas,
   isStrongInlineFormula,
   isWholeBareFormulaCandidate,
+  looksLikeStandaloneFormulaBlock,
   looksLikeFormula,
   normalizeEquationExpression,
   toRichText,
